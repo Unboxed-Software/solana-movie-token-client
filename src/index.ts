@@ -1,84 +1,80 @@
-import { initializeKeypair } from "./initializeKeypair"
-import * as web3 from "@solana/web3.js"
-import * as splToken from "@solana/spl-token"
+import { TOKEN_PROGRAM_ID } from "@solana/spl-token";
+import {
+  Connection,
+  LAMPORTS_PER_SOL,
+  PublicKey,
+  Transaction,
+  TransactionInstruction,
+  sendAndConfirmTransaction,
+  SystemProgram,
+  SYSVAR_RENT_PUBKEY,
+} from "@solana/web3.js";
+import {
+  initializeKeypair,
+  airdropIfRequired,
+  getExplorerLink,
+} from "@solana-developers/helpers";
 
-const PROGRAM_ID = new web3.PublicKey(
-  "HYkps3qJ9Uqq2NNTwU3VhpG2EaJgg1L4qsyXVnAvtYNJ"
-)
+const PROGRAM_ID = new PublicKey(
+  "AzKatnACpNwQxWRs2YyPovsGhgsYVBiTmC3TL4t72eJW",
+);
 
-async function initializeProgramTokenMint(
-  connection: web3.Connection,
-  signer: web3.Keypair,
-  programId: web3.PublicKey
-): Promise<string> {
-  const [tokenMint] = await web3.PublicKey.findProgramAddress(
-    [Buffer.from("token_mint")],
-    PROGRAM_ID
-  )
-  const [tokenAuth] = await web3.PublicKey.findProgramAddress(
-    [Buffer.from("token_auth")],
-    PROGRAM_ID
-  )
+const LOCALHOST_RPC_URL = "http://localhost:8899";
+const AIRDROP_AMOUNT = 2 * LAMPORTS_PER_SOL;
+const MINIMUM_BALANCE_FOR_RENT_EXEMPTION = 1 * LAMPORTS_PER_SOL;
 
-  splToken.createInitializeMintInstruction
-  const tx = new web3.Transaction()
-  const ix = new web3.TransactionInstruction({
-    keys: [
-      {
-        pubkey: signer.publicKey,
-        isSigner: true,
-        isWritable: false,
-      },
-      {
-        pubkey: tokenMint,
-        isSigner: false,
-        isWritable: true,
-      },
-      {
-        pubkey: tokenAuth,
-        isSigner: false,
-        isWritable: false,
-      },
-      {
-        pubkey: web3.SystemProgram.programId,
-        isSigner: false,
-        isWritable: false,
-      },
-      {
-        pubkey: splToken.TOKEN_PROGRAM_ID,
-        isSigner: false,
-        isWritable: false,
-      },
-      {
-        pubkey: web3.SYSVAR_RENT_PUBKEY,
-        isSigner: false,
-        isWritable: false,
-      },
-    ],
-    programId: PROGRAM_ID,
-    data: Buffer.from([3]),
-  })
+const connection = new Connection(LOCALHOST_RPC_URL);
+const userKeypair = await initializeKeypair(connection);
 
-  tx.add(ix)
-  return await web3.sendAndConfirmTransaction(connection, tx, [signer])
+await airdropIfRequired(
+  connection,
+  userKeypair.publicKey,
+  AIRDROP_AMOUNT,
+  MINIMUM_BALANCE_FOR_RENT_EXEMPTION,
+);
+
+const [tokenMintPDA] = PublicKey.findProgramAddressSync(
+  [Buffer.from("token_mint")],
+  PROGRAM_ID,
+);
+
+const [tokenAuthPDA] = PublicKey.findProgramAddressSync(
+  [Buffer.from("token_auth")],
+  PROGRAM_ID,
+);
+
+const INITIALIZE_MINT_INSTRUCTION = 3;
+
+const initializeMintInstruction = new TransactionInstruction({
+  keys: [
+    { pubkey: userKeypair.publicKey, isSigner: true, isWritable: false },
+    { pubkey: tokenMintPDA, isSigner: false, isWritable: true },
+    { pubkey: tokenAuthPDA, isSigner: false, isWritable: false },
+    { pubkey: SystemProgram.programId, isSigner: false, isWritable: false },
+    { pubkey: TOKEN_PROGRAM_ID, isSigner: false, isWritable: false },
+    { pubkey: SYSVAR_RENT_PUBKEY, isSigner: false, isWritable: false },
+  ],
+  programId: PROGRAM_ID,
+  data: Buffer.from([INITIALIZE_MINT_INSTRUCTION]),
+});
+
+const transaction = new Transaction().add(initializeMintInstruction);
+
+try {
+  const transactionSignature = await sendAndConfirmTransaction(
+    connection,
+    transaction,
+    [userKeypair],
+  );
+  const explorerLink = getExplorerLink("transaction", transactionSignature);
+
+  console.log(`Transaction submitted: ${explorerLink}`);
+} catch (error) {
+  if (error instanceof Error) {
+    throw new Error(
+      `Failed to initialize program token mint: ${error.message}`,
+    );
+  } else {
+    throw new Error("An unknown error occurred");
+  }
 }
-
-async function main() {
-  const connection = new web3.Connection("http://localhost:8899") //web3.clusterApiUrl("devnet"))
-  const signer = await initializeKeypair(connection)
-
-  const txid = await initializeProgramTokenMint(connection, signer, PROGRAM_ID)
-  console.log(
-    `Transaction submitted: https://explorer.solana.com/tx/${txid}?cluster=devnet`
-  )
-}
-
-main()
-  .then(() => {
-    console.log("Finished successfully")
-    process.exit(0)
-  })
-  .catch((error) => {
-    console.log(error)
-    process.exit(1)
-  })
